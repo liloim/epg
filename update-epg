@@ -1,0 +1,62 @@
+name: Update EPG
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download original EPG
+        run: |
+          curl -fL \
+            --retry 5 \
+            --retry-delay 10 \
+            --connect-timeout 30 \
+            "http://epg.one/epg.xml.gz" \
+            -o /tmp/source.xml.gz
+
+          gzip -t /tmp/source.xml.gz
+
+      - name: Rewrite picon URLs
+        run: |
+          gzip -dc /tmp/source.xml.gz \
+          | sed \
+              -e 's#http://epg\.one/img/#https://epg.ana-pivot.workers.dev/img/#g' \
+              -e 's#https://epg\.one/img/#https://epg.ana-pivot.workers.dev/img/#g' \
+              -e 's#http://cdn\.epg\.one/img/#https://epg.ana-pivot.workers.dev/cdn-img/#g' \
+              -e 's#https://cdn\.epg\.one/img/#https://epg.ana-pivot.workers.dev/cdn-img/#g' \
+          | gzip -9 > /tmp/epg.xml.gz
+
+      - name: Validate result
+        run: |
+          gzip -t /tmp/epg.xml.gz
+
+          echo "Checking rewritten URLs..."
+          gzip -dc /tmp/epg.xml.gz \
+            | grep -m 3 "epg.ana-pivot.workers.dev/img/"
+
+      - name: Publish without history
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git switch --orphan epg-data-temp
+          git rm -rf . || true
+
+          cp /tmp/epg.xml.gz ./epg.xml.gz
+
+          git add epg.xml.gz
+          git commit -m "Daily EPG update"
+
+          git push --force origin HEAD:epg-data
